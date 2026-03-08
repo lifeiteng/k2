@@ -29,6 +29,7 @@
 #include "k2/csrc/array.h"
 #include "k2/csrc/log.h"
 #include "k2/csrc/macros.h"
+#include "k2/csrc/merge_map_type.h"
 #include "k2/csrc/ragged.h"
 #include "k2/csrc/utils.h"
 
@@ -206,7 +207,7 @@ void OrPerSublist(const Ragged<T> &src, T initial_value, Array1<T> *or_values) {
         See also the version of Stack for class Ragged.
  */
 RaggedShape Stack(int32_t axis, int32_t src_size, RaggedShape **src,
-                  Array1<uint32_t> *merge_map = nullptr);
+                  Array1<merge_map_t> *merge_map = nullptr);
 
 
 /*
@@ -752,7 +753,7 @@ Ragged<T> Transpose(Ragged<T> &src,
                    of axes as the sources.
 */
 RaggedShape Cat(int32_t axis, int32_t num_srcs, RaggedShape **src,
-                Array1<uint32_t> *merge_map = nullptr);
+                Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   Extract meta-info from the shape (this will include populating any row_ids and
@@ -1036,7 +1037,7 @@ Renumbering PruneRagged(Ragged<T> &src,
  */
 template <typename T>
 Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> **src,
-                Array1<uint32_t> *merge_map = nullptr);
+                Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   This version of Stack() has one fewer levels of pointer indirection,
@@ -1044,7 +1045,7 @@ Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> **src,
  */
 template <typename T>
 Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> *src,
-                Array1<uint32_t> *merge_map = nullptr);
+                Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   Unstack a Ragged tensor to a list of Ragged, tensors all the output Ragged
@@ -1155,7 +1156,7 @@ void Unstack(Ragged<T> src, int32_t axis, std::vector<Ragged<T>> *out,
 */
 template <typename T>
 Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> **src,
-              Array1<uint32_t> *merge_map = nullptr);
+              Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   This version of Cat() has one fewer levels of pointer indirection,
@@ -1163,7 +1164,7 @@ Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> **src,
  */
 template <typename T>
 Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> *src,
-              Array1<uint32_t> *merge_map = nullptr);
+              Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   Construct a RaggedShape with 2 axes.
@@ -1517,15 +1518,15 @@ Ragged<T> Index(Ragged<T> &src, int32_t axis, const Array1<int32_t> &indexes,
                     number of axes as the sources.
 */
 RaggedShape Merge(int32_t num_srcs, RaggedShape **src,
-                  const Array1<uint32_t> &merge_map,
-                  Array1<uint32_t> *merge_map_out = nullptr);
+                  const Array1<merge_map_t> &merge_map,
+                  Array1<merge_map_t> *merge_map_out = nullptr);
 
 /*  Version of Merge that works on Ragged objects; see documentation for Merge()
     above. */
 template <typename T>
 Ragged<T> Merge(int32_t num_srcs, Ragged<T> **src,
-                const Array1<uint32_t> &merge_map,
-                Array1<uint32_t> *merge_map_out = nullptr);
+                const Array1<merge_map_t> &merge_map,
+                Array1<merge_map_t> *merge_map_out = nullptr);
 
 /*
   Returns a ragged tensor after removing all 'values' that were <= a provided

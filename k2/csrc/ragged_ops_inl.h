@@ -165,11 +165,11 @@ Ragged<T> NormalizePerSublist(Ragged<T> &src, bool use_log) {
 
 template <typename T>
 Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> **src,
-                Array1<uint32_t> *merge_map /* = nullptr */) {
+                Array1<merge_map_t> *merge_map /* = nullptr */) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
-  Array1<uint32_t> merge_map_temp;
-  Array1<uint32_t> *merge_map_ptr =
+  Array1<merge_map_t> merge_map_temp;
+  Array1<merge_map_t> *merge_map_ptr =
       (merge_map != nullptr ? merge_map : &merge_map_temp);
   std::vector<RaggedShape *> src_shapes(num_srcs);
   std::vector<const Array1<T> *> src_values(num_srcs);
@@ -186,7 +186,7 @@ Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> **src,
 
 template <typename T>
 Ragged<T> Stack(int32_t axis, int32_t num_srcs, Ragged<T> *src,
-                Array1<uint32_t> *merge_map /* = nullptr */) {
+                Array1<merge_map_t> *merge_map /* = nullptr */) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK(axis == 0 || axis == 1);
   K2_CHECK_GT(num_srcs, 0);
@@ -254,11 +254,11 @@ void Unstack(Ragged<T> src, int32_t axis, bool pad_right,
 
 template <typename T>
 Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> **src,
-              Array1<uint32_t> *merge_map /* = nullptr*/) {
+              Array1<merge_map_t> *merge_map /* = nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
-  Array1<uint32_t> merge_map_temp;
-  Array1<uint32_t> *merge_map_ptr =
+  Array1<merge_map_t> merge_map_temp;
+  Array1<merge_map_t> *merge_map_ptr =
       (merge_map != nullptr ? merge_map : &merge_map_temp);
   std::vector<RaggedShape *> src_shapes(num_srcs);
   std::vector<const Array1<T> *> src_values(num_srcs);
@@ -274,7 +274,7 @@ Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> **src,
 
 template <typename T>
 Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> *src,
-              Array1<uint32_t> *merge_map /* = nullptr*/) {
+              Array1<merge_map_t> *merge_map /* = nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK(axis == 0 || axis == 1) << "Given: " << axis;
   K2_CHECK_GT(num_srcs, 0);
@@ -285,12 +285,12 @@ Ragged<T> Cat(int32_t axis, int32_t num_srcs, Ragged<T> *src,
 
 template <typename T>
 Ragged<T> Merge(int32_t num_srcs, Ragged<T> **src,
-                const Array1<uint32_t> &merge_map,
-                Array1<uint32_t> *merge_map_out) {
+                const Array1<merge_map_t> &merge_map,
+                Array1<merge_map_t> *merge_map_out) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
-  Array1<uint32_t> merge_map_temp;
-  Array1<uint32_t> *merge_map_ptr =
+  Array1<merge_map_t> merge_map_temp;
+  Array1<merge_map_t> *merge_map_ptr =
       (merge_map_out != nullptr ? merge_map_out : &merge_map_temp);
   std::vector<RaggedShape *> src_shapes(num_srcs);
   std::vector<const Array1<T> *> src_values(num_srcs);

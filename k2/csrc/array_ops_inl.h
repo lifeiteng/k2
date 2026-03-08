@@ -1006,7 +1006,7 @@ void Assign(Array1<S> &src, Array1<T> *dest) {
 }
 
 template <typename T>
-Array1<T> MergeWithMap(const Array1<uint32_t> &merge_map, int32_t num_srcs,
+Array1<T> MergeWithMap(const Array1<merge_map_t> &merge_map, int32_t num_srcs,
                        const Array1<T> **src) {
   NVTX_RANGE(K2_FUNC);
   int32_t dim = merge_map.Dim();
@@ -1021,13 +1021,14 @@ Array1<T> MergeWithMap(const Array1<uint32_t> &merge_map, int32_t num_srcs,
   K2_CHECK_EQ(src_tot_dim, dim);
   Array1<const T *> src_ptrs(c, src_ptrs_vec);
   Array1<T> ans(c, dim);
-  const uint32_t *merge_map_data = merge_map.Data();
+  const merge_map_t *merge_map_data = merge_map.Data();
   T *ans_data = ans.Data();
   const T **src_ptrs_data = src_ptrs.Data();
   K2_EVAL(
       c, dim, lambda_merge_data, (int32_t i)->void {
-        uint32_t m = merge_map_data[i], src_idx = m % (uint32_t)num_srcs,
-                 src_pos = m / (uint32_t)num_srcs;
+        merge_map_t m = merge_map_data[i],
+                    src_idx = m % (merge_map_t)num_srcs,
+                    src_pos = m / (merge_map_t)num_srcs;
         ans_data[i] = src_ptrs_data[src_idx][src_pos];
       });
   return ans;

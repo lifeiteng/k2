@@ -429,7 +429,7 @@ Array1<int32_t> RowSplitsToSizes(const Array1<int32_t> &row_splits) {
 //  num_rows
 __global__ void SizesToMergeMapKernel(int32_t num_rows, int32_t threads_per_row,
                                       const int32_t *row_splits,
-                                      int32_t num_elems, uint32_t *merge_map) {
+                                      int32_t num_elems, merge_map_t *merge_map) {
   int32_t thread = blockIdx.x * blockDim.x + threadIdx.x,
           num_threads = gridDim.x * blockDim.x, row = thread / threads_per_row,
           thread_this_row = thread % threads_per_row;
@@ -444,11 +444,11 @@ __global__ void SizesToMergeMapKernel(int32_t num_rows, int32_t threads_per_row,
 #pragma unroll(4)
   for (; thread_this_row < row_length; thread_this_row += threads_per_row)
     merge_map[this_row_split + thread_this_row] =
-        uint32_t(row) + uint32_t(num_rows) * uint32_t(thread_this_row);
+        merge_map_t(row) + merge_map_t(num_rows) * merge_map_t(thread_this_row);
 }
 
-Array1<uint32_t> SizesToMergeMap(ContextPtr c,
-                                 const std::vector<int32_t> &sizes) {
+Array1<merge_map_t> SizesToMergeMap(ContextPtr c,
+                                    const std::vector<int32_t> &sizes) {
   NVTX_RANGE(K2_FUNC);
   int32_t num_srcs = sizes.size();
 
@@ -461,9 +461,9 @@ Array1<uint32_t> SizesToMergeMap(ContextPtr c,
     tot_size += sizes[i];
     row_splits_cpu_data[i + 1] = tot_size;
   }
-  Array1<uint32_t> ans(c, tot_size);
+  Array1<merge_map_t> ans(c, tot_size);
   if (tot_size == 0) return ans;
-  uint32_t *ans_data = ans.Data();
+  merge_map_t *ans_data = ans.Data();
 
   if (c->GetDeviceType() == kCpu) {
     int32_t cur = 0;
@@ -474,7 +474,7 @@ Array1<uint32_t> SizesToMergeMap(ContextPtr c,
         // the 'src' says which source this item came from, and (cur - begin)
         // is the position within that source.
         ans_data[cur] =
-            uint32_t(src) + uint32_t(cur - begin) * uint32_t(num_srcs);
+            merge_map_t(src) + merge_map_t(cur - begin) * merge_map_t(num_srcs);
       }
     }
   } else {
@@ -495,9 +495,9 @@ Array1<uint32_t> SizesToMergeMap(ContextPtr c,
     // Below version can be just faster than the above version when
     // num_srcs > 5000 and tot_size > 1,000,000
     mgpu::context_t *mgpu_context = GetModernGpuAllocator(c);
-    auto lambda_set_ans = [=] __device__(uint32_t index, uint32_t seg,
-                                         uint32_t rank) {
-      ans_data[index] = seg + rank * static_cast<uint32_t>(num_srcs);
+    auto lambda_set_ans = [=] __device__(merge_map_t index, merge_map_t seg,
+                                         merge_map_t rank) {
+      ans_data[index] = seg + rank * static_cast<merge_map_t>(num_srcs);
     };
     K2_CUDA_SAFE_CALL(mgpu::transform_lbs(lambda_set_ans, tot_size,
                                           row_splits.Data(),

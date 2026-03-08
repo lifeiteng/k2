@@ -684,12 +684,13 @@ void GetRowInfoMulti(int32_t num_srcs, RaggedShape **src,
 }
 
 /*static*/ RaggedShape StackAxis0(int32_t num_srcs, RaggedShape **src,
-                                  Array1<uint32_t> *merge_map /* == nullptr*/) {
+                                  Array1<merge_map_t> *merge_map /* == nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   if (num_srcs == 1) {
     if (merge_map)
       *merge_map =
-          Arange<uint32_t>(src[0]->Context(), 0, src[0]->NumElements());
+          Arange<merge_map_t>(src[0]->Context(), 0,
+                              (merge_map_t)src[0]->NumElements());
     RaggedShape top_layer = TrivialShape(src[0]->Context(), src[0]->Dim0());
     return ComposeRaggedShapes(top_layer, **src);
   }
@@ -745,9 +746,9 @@ void GetRowInfoMulti(int32_t num_srcs, RaggedShape **src,
   RowIdsAccessor<5> new_row_ids_acc(ans);
 
 
-  uint32_t *merge_map_data;
+  merge_map_t *merge_map_data;
   if (merge_map != nullptr) {
-    *merge_map = Array1<uint32_t>(c, tot_sizes_out.data[num_axes_out - 1]);
+    *merge_map = Array1<merge_map_t>(c, tot_sizes_out.data[num_axes_out - 1]);
     merge_map_data = merge_map->Data();
   } else {
     merge_map_data = nullptr;
@@ -778,7 +779,7 @@ void GetRowInfoMulti(int32_t num_srcs, RaggedShape **src,
         job_begin = offsets_acc(axis, ans_idx0), job_this_idx0 = i - job_begin;
     K2_CHECK_GE(job_this_idx0, 0);
     int32_t row_split_value = 0,  new_next_offset = 0;
-    uint32_t *merge_map_data_local = nullptr;
+    merge_map_t *merge_map_data_local = nullptr;
     if (axis + 1 < num_axes_out) {
       new_next_offset = offsets_acc(axis + 1, ans_idx0);
     } else {
@@ -798,7 +799,7 @@ void GetRowInfoMulti(int32_t num_srcs, RaggedShape **src,
       }
 
       if (merge_map_data_local != nullptr) {
-        merge_map_data_local[i] = ans_idx0 + num_srcs * job_this_idx0;
+        merge_map_data_local[i] = (merge_map_t)ans_idx0 + (merge_map_t)num_srcs * (merge_map_t)job_this_idx0;
       }
 
       if (axis + 1 < num_axes_out) {
@@ -842,7 +843,7 @@ void GetRowInfoMulti(int32_t num_srcs, RaggedShape **src,
 }
 
 RaggedShape Cat(int32_t axis, int32_t num_srcs, RaggedShape **src,
-                Array1<uint32_t> *merge_map /* == nullptr*/) {
+                Array1<merge_map_t> *merge_map /* == nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
   if (axis == 0) {
@@ -865,16 +866,16 @@ RaggedShape Cat(int32_t axis, int32_t num_srcs, RaggedShape **src,
     ans_layers[l] = src[0]->Layers()[l];
   }
 
-  Array1<uint32_t> merge_map_local;
-  Array1<uint32_t> *this_m =
+  Array1<merge_map_t> merge_map_local;
+  Array1<merge_map_t> *this_m =
       (axis + 1 == num_axes ? merge_map : &merge_map_local);
   RaggedShape s = IntersperseRaggedLayer(axis - 1, num_srcs, src, this_m),
               t = SubsampleRaggedLayer(s, 0, num_srcs);
   ans_layers[axis - 1] = t.Layers()[0];
 
   for (int32_t l = axis; l + 1 < num_axes; l++) {
-    Array1<uint32_t> merge_map_next;
-    Array1<uint32_t> *this_m =
+    Array1<merge_map_t> merge_map_next;
+    Array1<merge_map_t> *this_m =
         (l + 2 == num_axes ? merge_map : &merge_map_next);
     RaggedShape r = MergeRaggedLayer(l, num_srcs, src, merge_map_local, this_m);
     ans_layers[l] = r.Layers()[0];
@@ -1063,7 +1064,7 @@ RaggedShape Transpose(RaggedShape &src, Array1<int32_t> *value_indexes) {
 }
 
 RaggedShape Stack(int32_t axis, int32_t num_srcs, RaggedShape **src,
-                  Array1<uint32_t> *merge_map /* = nullptr*/) {
+                  Array1<merge_map_t> *merge_map /* = nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
   K2_CHECK_LT(static_cast<uint32_t>(axis),
@@ -1087,8 +1088,8 @@ RaggedShape Stack(int32_t axis, int32_t num_srcs, RaggedShape **src,
     ans_layers[l] = src[0]->Layers()[l];
   }
 
-  Array1<uint32_t> merge_map_local;
-  Array1<uint32_t> *this_m =
+  Array1<merge_map_t> merge_map_local;
+  Array1<merge_map_t> *this_m =
       (axis + 1 == num_axes ? merge_map : &merge_map_local);
   RaggedShape s = IntersperseRaggedLayer(axis - 1, num_srcs, src, this_m);
   // note: s.Dim0() will be a multiple of num_srcs.
@@ -1097,8 +1098,8 @@ RaggedShape Stack(int32_t axis, int32_t num_srcs, RaggedShape **src,
   ans_layers[axis] = s.Layers()[0];
 
   for (int32_t l = axis; l + 1 < num_axes; l++) {
-    Array1<uint32_t> merge_map_next;
-    Array1<uint32_t> *this_m =
+    Array1<merge_map_t> merge_map_next;
+    Array1<merge_map_t> *this_m =
         (l + 2 == num_axes ? merge_map : &merge_map_next);
     RaggedShape r = MergeRaggedLayer(l, num_srcs, src, merge_map_local, this_m);
     ans_layers[l + 1] = r.Layers()[0];
@@ -1423,8 +1424,8 @@ void Unstack(RaggedShape &src, int32_t axis, std::vector<RaggedShape> *out,
 }
 
 RaggedShape Merge(int32_t num_srcs, RaggedShape **src,
-                  const Array1<uint32_t> &merge_map,
-                  Array1<uint32_t> *merge_map_out) {
+                  const Array1<merge_map_t> &merge_map,
+                  Array1<merge_map_t> *merge_map_out) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK(num_srcs > 0);
   int32_t num_layers = src[0]->NumAxes() - 1;
@@ -1432,11 +1433,11 @@ RaggedShape Merge(int32_t num_srcs, RaggedShape **src,
   std::vector<RaggedShapeLayer> ans_layers(num_layers);
 
   // Note: this is a shallow copy.
-  Array1<uint32_t> merge_map_local = merge_map;
+  Array1<merge_map_t> merge_map_local = merge_map;
 
   for (int32_t l = 0; l < num_layers; l++) {
-    Array1<uint32_t> merge_map_next;
-    Array1<uint32_t> *this_m =
+    Array1<merge_map_t> merge_map_next;
+    Array1<merge_map_t> *this_m =
         (l + 1 == num_layers ? merge_map_out : &merge_map_next);
     RaggedShape r = MergeRaggedLayer(l, num_srcs, src, merge_map_local, this_m);
     ans_layers[l] = r.Layers()[0];

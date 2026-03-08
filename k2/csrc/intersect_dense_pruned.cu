@@ -553,7 +553,7 @@ class MultiGraphDenseIntersectPruned {
 
     RaggedShape oshape;
     // see documentation of Stack() in ragged_ops.h for explanation.
-    Array1<uint32_t> oshape_merge_map;
+    Array1<merge_map_t> oshape_merge_map;
 
     {
       NVTX_RANGE("InitOshape");
@@ -592,7 +592,7 @@ class MultiGraphDenseIntersectPruned {
     int32_t b_fsas_num_cols = b_fsas_->scores.Dim1();
     const int32_t *b_fsas_row_ids1 = b_fsas_->shape.RowIds(1).Data();
 
-    const uint32_t *oshape_merge_map_data = oshape_merge_map.Data();
+    const merge_map_t *oshape_merge_map_data = oshape_merge_map.Data();
 
     K2_EVAL(
         c_, num_arcs, lambda_format_arc_data,
@@ -605,10 +605,10 @@ class MultiGraphDenseIntersectPruned {
                     oarc_idx1 = oarc_idx01 - oarc_idx0x,
              oarc_idx01x_next = oshape_row_splits2[oarc_idx01 + 1];
 
-        uint32_t m = oshape_merge_map_data[oarc_idx0123];
-        int32_t  t = m % uint32_t(T + 2),  // actually we won't get t == T or t == T + 1
-                                            // here since those frames have no arcs.
-                arcs_idx012 = m / uint32_t(T + 2);  // arc_idx012 into FrameInfo::arcs on time t,
+        merge_map_t m = oshape_merge_map_data[oarc_idx0123];
+        int32_t  t = m % merge_map_t(T + 2),  // actually we won't get t == T or t == T + 1
+                                               // here since those frames have no arcs.
+                arcs_idx012 = m / merge_map_t(T + 2);  // arc_idx012 into FrameInfo::arcs on time t,
                                             // index of the arc on that frame.
 
           K2_CHECK_EQ(t, oarc_idx1);

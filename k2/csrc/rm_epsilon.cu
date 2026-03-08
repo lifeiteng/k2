@@ -1130,7 +1130,7 @@ void RemoveEpsilonDevice(FsaOrVec &src_fsa, FsaOrVec *dest_fsa,
   FsaVec *vecs[4] = {&combined_foll, &combined_prec, &combined_prec_foll,
                      &non_epsilon_fsa};
   int32_t axis = 2;
-  Array1<uint32_t> arcs_merge_map;
+  Array1<merge_map_t> arcs_merge_map;
   FsaVec dest_fsa_unsorted = Cat(axis, 4, vecs, &arcs_merge_map);
 
   Ragged<int32_t> non_epsilon_arc_map_ragged(

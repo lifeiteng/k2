@@ -27,6 +27,7 @@
 #include "k2/csrc/array.h"
 #include "k2/csrc/log.h"
 #include "k2/csrc/macros.h"
+#include "k2/csrc/merge_map_type.h"
 #include "k2/csrc/ragged.h"
 #include "k2/csrc/utils.h"
 
@@ -92,7 +93,7 @@ void CheckLayerEqual(int32_t layer,
 RaggedShape AppendRaggedLayer(int32_t axis,
                               int32_t num_srcs,
                               RaggedShape **src,
-                              Array1<uint32_t> *merge_map = nullptr);
+                              Array1<merge_map_t> *merge_map = nullptr);
 
 
 
@@ -137,7 +138,7 @@ RaggedShape AppendRaggedLayer(int32_t axis,
 RaggedShape IntersperseRaggedLayer(int32_t layer,
                                    int32_t num_srcs,
                                    RaggedShape **src,
-                                   Array1<uint32_t> *merge_map = nullptr);
+                                   Array1<merge_map_t> *merge_map = nullptr);
 
 /*
   Merge a ragged axis given a 'merge_map' obtained from an operation on a previous
@@ -169,8 +170,8 @@ RaggedShape IntersperseRaggedLayer(int32_t layer,
 RaggedShape MergeRaggedLayer(int32_t layer,
                              int32_t num_srcs,
                              RaggedShape **src,
-                             const Array1<uint32_t> &merge_map,
-                             Array1<uint32_t> *merge_map_out = nullptr);
+                             const Array1<merge_map_t> &merge_map,
+                             Array1<merge_map_t> *merge_map_out = nullptr);
 
 /*
   An operation on one layer of a ragged shape that subsamples the rows.

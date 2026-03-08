@@ -28,6 +28,7 @@
 #include "k2/csrc/context.h"
 #include "k2/csrc/log.h"
 #include "k2/csrc/macros.h"
+#include "k2/csrc/merge_map_type.h"
 #include "k2/csrc/ragged.h"
 #include "k2/csrc/utils.h"
 
@@ -505,8 +506,8 @@ void RowIdsToRowSplits(const Array1<int32_t> &row_ids,
    EXAMPLE.  Suppose sizes is [ 3, 5, 1 ].  Then merge_map will be:
     [ 0, 3, 6, 1, 4, 7, 10, 13, 2 ].
  */
-Array1<uint32_t> SizesToMergeMap(ContextPtr c,
-                                 const std::vector<int32_t> &sizes);
+Array1<merge_map_t> SizesToMergeMap(ContextPtr c,
+                                    const std::vector<int32_t> &sizes);
 
 /*
   Returns a new Array1<T> whose elements are this array's elements plus t.
@@ -784,7 +785,7 @@ void Assign(Array1<S> &src, Array1<T> *dest);
    CAUTION: may segfault if merge_map contains invalid values.
  */
 template <typename T>
-Array1<T> MergeWithMap(const Array1<uint32_t> &merge_map, int32_t num_srcs,
+Array1<T> MergeWithMap(const Array1<merge_map_t> &merge_map, int32_t num_srcs,
                        const Array1<T> **src);
 
 /* Compute the sum of an array.

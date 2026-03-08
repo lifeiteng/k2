@@ -83,15 +83,16 @@ void CheckLayerEqual(int32_t layer,
 RaggedShape IntersperseRaggedLayer(int32_t layer,
                                    int32_t num_srcs,
                                    RaggedShape **src,
-                                   Array1<uint32_t> *merge_map) {
+                                   Array1<merge_map_t> *merge_map) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
   K2_CHECK_GE(layer, 0);
   K2_CHECK_LT(layer + 1, src[0]->NumAxes());
   if (num_srcs == 1) {
     if (merge_map)
-      *(reinterpret_cast<Array1<int32_t>*>(merge_map)) =
-          Range(src[0]->Context(), src[0]->TotSize(layer + 1), 0);
+      *merge_map =
+          Arange<merge_map_t>(src[0]->Context(), 0,
+                              (merge_map_t)src[0]->TotSize(layer + 1));
     std::vector<RaggedShapeLayer> layers;
     layers.emplace_back(src[0]->Layers()[layer]);
     return RaggedShape(layers);
@@ -165,9 +166,9 @@ RaggedShape IntersperseRaggedLayer(int32_t layer,
   RowSplitsToRowIds(row_splits, &row_ids);
 
   if (merge_map != nullptr) {
-    *merge_map = Array1<uint32_t>(c, tot_elems);
+    *merge_map = Array1<merge_map_t>(c, tot_elems);
     const int32_t *row_ids_data = row_ids.Data();
-    uint32_t *merge_map_data = merge_map->Data();
+    merge_map_t *merge_map_data = merge_map->Data();
 
     K2_EVAL(c, tot_elems, lambda_set_merge_map, (int32_t idx01) -> void {
         int32_t idx0 = row_ids_data[idx01],
@@ -180,7 +181,7 @@ RaggedShape IntersperseRaggedLayer(int32_t layer,
         // We multiply the src_idx01 by num_srcs as a way of encoding it and the
         // src into a single integer.
         merge_map_data[idx01] =
-            uint32_t(src) + ((uint32_t)num_srcs * uint32_t(src_idx01));
+            merge_map_t(src) + ((merge_map_t)num_srcs * merge_map_t(src_idx01));
       });
   }
 
@@ -191,8 +192,8 @@ RaggedShape IntersperseRaggedLayer(int32_t layer,
 RaggedShape MergeRaggedLayer(int32_t layer,
                              int32_t num_srcs,
                              RaggedShape **src,
-                             const Array1<uint32_t> &merge_map,
-                             Array1<uint32_t> *merge_map_out /*= nullptr*/) {
+                             const Array1<merge_map_t> &merge_map,
+                             Array1<merge_map_t> *merge_map_out /*= nullptr*/) {
   NVTX_RANGE(K2_FUNC);
   K2_CHECK_GT(num_srcs, 0);
   K2_CHECK_GE(layer, 0);
@@ -212,15 +213,15 @@ RaggedShape MergeRaggedLayer(int32_t layer,
   Array1<int32_t> row_splits_out(c, merge_map.Dim() + 1);
   Array1<int32_t> row_ids_out(c, tot_elems);
 
-  const uint32_t *merge_map_data = merge_map.Data();
+  const merge_map_t *merge_map_data = merge_map.Data();
   Array1<int32_t*> row_splits_ptrs(c, row_splits_ptrs_vec);
   int32_t **row_splits_ptrs_data = row_splits_ptrs.Data();
   int32_t *sizes_data = row_splits_out.Data();
 
   K2_EVAL(c, tot_rows, lambda_set_sizes, (int32_t i) -> void {
-      uint32_t m = merge_map_data[i],
-             src = m % num_srcs,
-             pos = m / num_srcs;
+      merge_map_t m = merge_map_data[i],
+                  src = m % num_srcs,
+                  pos = m / num_srcs;
       int32_t size = row_splits_ptrs_data[src][pos + 1] -
                      row_splits_ptrs_data[src][pos];
       sizes_data[i] = size;
@@ -229,24 +230,24 @@ RaggedShape MergeRaggedLayer(int32_t layer,
   RowSplitsToRowIds(row_splits_out, &row_ids_out);
 
   if (merge_map_out != nullptr) {
-    *merge_map_out = Array1<uint32_t>(c, tot_elems);
+    *merge_map_out = Array1<merge_map_t>(c, tot_elems);
     const int32_t *row_ids_data = row_ids_out.Data(),
                *row_splits_data = row_splits_out.Data();
-    uint32_t *merge_map_out_data = merge_map_out->Data();
+    merge_map_t *merge_map_out_data = merge_map_out->Data();
 
     K2_EVAL(c, tot_elems, lambda_set_merge_map, (int32_t idx01) -> void {
         int32_t idx0 = row_ids_data[idx01],
                idx0x = row_splits_data[idx0],
-                idx1 = idx01 - idx0x,
-                   m = merge_map_data[idx0],
-                 src = m % num_srcs,
+                idx1 = idx01 - idx0x;
+        merge_map_t m = merge_map_data[idx0];
+        int32_t src = m % num_srcs,
             src_idx0 = m / num_srcs,
            src_idx0x = row_splits_ptrs_data[src][src_idx0],
            src_idx01 = src_idx0x + idx1;
         // We multiply the src_idx01 by num_srcs as a way of encoding it and the
         // src into a single integer.
-        merge_map_out_data[idx01] = uint32_t(src) +
-                                    ((uint32_t)num_srcs * uint32_t(src_idx01));
+        merge_map_out_data[idx01] = merge_map_t(src) +
+                                    ((merge_map_t)num_srcs * merge_map_t(src_idx01));
       });
   }
   return RaggedShape2(&row_splits_out, &row_ids_out, tot_elems);
