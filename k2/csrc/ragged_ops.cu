@@ -1580,24 +1580,27 @@ Array1<int32_t> GetTransposeReordering(Ragged<int32_t> &src, int32_t num_cols) {
   int32_t num_elements = src.values.Dim();
   int32_t log_buckets = static_cast<int32_t>(ceilf(log2f(num_buckets)));
 
-  Array1<int32_t> ans = Range(context, num_elements, 0);
+  // CUB's pointer-based SortPairs does not support overlapping input/output
+  // buffers.  Keep keys and values separate, matching the non-MSVC path below.
+  // The original Windows branch reused ans for values_in and values_out, which
+  // causes an illegal memory access with recent CUB releases (CUDA 12.9).
+  Array1<int32_t> order = Range(context, num_elements, 0);
+  Array1<int32_t> sorted_keys(context, num_elements);
+  Array1<int32_t> ans(context, num_elements);
 
   cudaStream_t stream = context->GetCudaStream();
 
   size_t temp_storage_bytes = 0;
   K2_CUDA_SAFE_CALL(cub::DeviceRadixSort::SortPairs(
-      nullptr, temp_storage_bytes, src.values.Data(),
-      static_cast<int32_t *>(nullptr), ans.Data(), ans.Data(), num_elements, 0,
-      log_buckets, stream));
+      nullptr, temp_storage_bytes, src.values.Data(), sorted_keys.Data(),
+      order.Data(), ans.Data(), num_elements, 0, log_buckets, stream));
 
-  Array1<int8_t> d_temp_storage(
-      context, temp_storage_bytes + num_elements * sizeof(int32_t));
+  Array1<int8_t> d_temp_storage(context, temp_storage_bytes);
 
   K2_CUDA_SAFE_CALL(cub::DeviceRadixSort::SortPairs(
-      d_temp_storage.Data() + sizeof(int32_t) * num_elements,
-      temp_storage_bytes, src.values.Data(),
-      reinterpret_cast<int32_t *>(d_temp_storage.Data()), ans.Data(),
-      ans.Data(), num_elements, 0, log_buckets, stream));
+      d_temp_storage.Data(), temp_storage_bytes, src.values.Data(),
+      sorted_keys.Data(), order.Data(), ans.Data(), num_elements, 0,
+      log_buckets, stream));
 
   return ans;
 
