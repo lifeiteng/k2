@@ -40,6 +40,14 @@ using namespace intersect_pruned_internal;  // NOLINT
 */
 class MultiGraphDenseIntersectPruned {
  public:
+  /* Online decoding only.  When true, the next FormatOutput() treats every
+     state active on the last frame as final (the allow_partial path) even if
+     the real final state is reachable.  Used when committing a chunk in the
+     middle of an utterance: text end being reachable there is not evidence
+     that the speech ended, and forcing completion would squeeze the rest of
+     the transcript into the chunk tail.  Requires allow_partial. */
+  void SetForcePartialFinal(bool force) { force_partial_final_ = force; }
+
   /**
      Pruned intersection (a.k.a. composition) that corresponds to decoding for
      speech recognition-type tasks
@@ -833,6 +841,7 @@ class MultiGraphDenseIntersectPruned {
     auto has_valid_final_arc = Array1<bool>(c_, NumFsas(), false);
     bool *has_valid_final_arc_data = has_valid_final_arc.Data();
     bool allow_partial = allow_partial_;
+    bool force_partial_final = force_partial_final_;
 
     if (allow_partial_) {
       K2_EVAL(
@@ -872,11 +881,13 @@ class MultiGraphDenseIntersectPruned {
           K2_DCHECK_LT(static_cast<uint32_t>(scores_idx2),
                        static_cast<uint32_t>(scores_num_cols));
           float acoustic_score = scores_acc(scores_idx01, scores_idx2);
+          float graph_score = arc.score;
           auto dest_state = arc.dest_state;
           auto final_t = b_fsas_row_splits1[ai_fsa_idx0+1] - b_fsas_row_splits1[ai_fsa_idx0];
 
           if (final_t - 1 == t &&
-              (allow_partial && !has_valid_final_arc_data[ai_fsa_idx0])) {
+              (allow_partial &&
+               (force_partial_final || !has_valid_final_arc_data[ai_fsa_idx0]))) {
               int32_t a_fsas_idx0 = a_fsas_row_ids1[sinfo.a_fsas_state_idx01];
               // state_idx1 is 0-based.
               // So "-1" is used when calculating a_fsas_final_state_idx1.
@@ -884,10 +895,15 @@ class MultiGraphDenseIntersectPruned {
                 = a_fsas_row_splits1[a_fsas_idx0 + 1] - 1 - a_fsas_row_splits1[a_fsas_idx0];
               dest_state = a_fsas_final_state_idx1;
               acoustic_score = 0.0;
+              // A forced partial end is a zero-cost virtual termination: rank
+              // the states by forward score alone.  Keeping arc.score would
+              // compare F(q) + max outgoing weight and could commit a state
+              // with a lower forward score.
+              if (force_partial_final) graph_score = 0.0;
           }
           ArcInfo ai;
           ai.a_fsas_arc_idx012 = a_fsas_arc_idx012;
-          ai.arc_loglike = acoustic_score + arc.score;
+          ai.arc_loglike = acoustic_score + graph_score;
           ai.end_loglike =
               OrderedIntToFloat(sinfo.forward_loglike) + ai.arc_loglike;
           // at least currently, the ArcInfo object's src_state and dest_state
@@ -1653,6 +1669,7 @@ class MultiGraphDenseIntersectPruned {
   int32_t min_active_;
   int32_t max_active_;
   bool allow_partial_;
+  bool force_partial_final_ = false;  // see SetForcePartialFinal()
   Array1<float> dynamic_beams_;  // dynamic beams (initially just search_beam_
                                  // but change due to max_active/min_active
                                  // constraints).
@@ -1745,6 +1762,10 @@ OnlineDenseIntersecter::OnlineDenseIntersecter(FsaVec &a_fsas,
   impl_ = new MultiGraphDenseIntersectPruned(a_fsas, num_seqs, search_beam,
       output_beam, min_active_states, max_active_states, allow_partial,
       online_decoding);
+}
+
+void OnlineDenseIntersecter::SetForcePartialFinal(bool force) {
+  impl_->SetForcePartialFinal(force);
 }
 
 OnlineDenseIntersecter::~OnlineDenseIntersecter(){

@@ -197,6 +197,14 @@ class OnlineDenseIntersecter {
                 std::vector<DecodeStateInfo* > *decode_states,
                 FsaVec *ofsa, Array1<int32_t> *arc_map_a);
 
+    /* When `force` is true, subsequent Decode() calls build the output lattice
+       as if no real final state were active on the last frame: every state
+       active there is treated as final (requires allow_partial == true).
+       Use it for a chunk committed in the middle of an utterance, where the
+       end of the transcript may be reachable but has not actually been spoken
+       yet; leave it false for the last chunk.  Default false. */
+    void SetForcePartialFinal(bool force);
+
     ContextPtr &Context() { return c_;}
     ~OnlineDenseIntersecter();
 
