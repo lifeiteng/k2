@@ -205,6 +205,25 @@ void IntersectDensePruned(FsaVec &a_fsas, DenseFsaVec &b_fsas,
                           FsaVec *out, Array1<int32_t> *arc_map_a,
                           Array1<int32_t> *arc_map_b);
 
+/* Cancellation checkpoint for IntersectDensePruned: called on the calling
+   thread after the forward pass finishes frame t (0 <= t <= num_frames, the
+   last one being the padding frame).  Return true to abandon the search. */
+typedef bool (*IntersectShouldStopFn)(int32_t t, int32_t num_frames,
+                                      void *user_data);
+
+/* Same as IntersectDensePruned above, but polls `should_stop` once per frame
+   (nullptr = never stop).  Returns false when `should_stop` abandoned the
+   search; `out`, `arc_map_a` and `arc_map_b` are then left untouched and the
+   remaining frames and the output formatting are not computed.  Returns true
+   when the search completed, with outputs identical to the overload above. */
+bool IntersectDensePruned(FsaVec &a_fsas, DenseFsaVec &b_fsas,
+                          float search_beam, float output_beam,
+                          int32_t min_active_states, int32_t max_active_states,
+                          bool allow_partial,
+                          FsaVec *out, Array1<int32_t> *arc_map_a,
+                          Array1<int32_t> *arc_map_b,
+                          IntersectShouldStopFn should_stop, void *user_data);
+
 /* IntersectDense is a version of IntersectDensePruned that does not
    do pruning in the 1st pass.
 

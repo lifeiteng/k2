@@ -18,6 +18,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <vector>
 
@@ -155,8 +156,18 @@ class MultiGraphDenseIntersectPruned {
        @param [in] b_fsas  The neural-net output, with each frame containing the
                            log-likes of each phone.  A series of sequences of
                            (in general) different length.
+       @param [in] should_stop  Optional cancellation checkpoint, called on the
+                           calling thread after every forward frame with
+                           (t, T, user_data), t in [0, T].  Returning true
+                           abandons the intersection.
+       @param [in] user_data  Passed through to should_stop.
+       @return  false if should_stop abandoned the intersection; the object
+                then holds no usable result and FormatOutput() must not be
+                called.  true otherwise.
    */
-  void Intersect(DenseFsaVec *b_fsas) {
+  bool Intersect(DenseFsaVec *b_fsas,
+                 IntersectShouldStopFn should_stop = nullptr,
+                 void *user_data = nullptr) {
     /*
       T is the largest number of (frames+1) of neural net output, or the largest
       number of frames of log-likelihoods we count the final frame with (0,
@@ -222,6 +233,8 @@ class MultiGraphDenseIntersectPruned {
 
     frames_.push_back(InitialFrameInfo());
 
+    // Number of pruning phases signalled to the backward thread so far.
+    size_t signalled_phases = 0;
     for (int32_t t = 0; t <= T; t++) {
       if (state_map_.NumKeyBits() == 32) {
         frames_.push_back(PropagateForward<32>(t, frames_.back().get()));
@@ -234,10 +247,23 @@ class MultiGraphDenseIntersectPruned {
       if (do_pruning_after_[t]) {
         // let a phase of backward-pass pruning commence.
         backward_semaphore_.Signal(c_);
+        ++signalled_phases;
         // note: normally we should acquire forward_semaphore_ without having to
         // wait.  It avoids the backward pass getting too far behind the forward
         // pass, which could mean too much memory is used.
         forward_semaphore_.acquire();
+      }
+      if (should_stop != nullptr && should_stop(t, T, user_data)) {
+        // The backward thread waits once per pruning phase.  Mark the run as
+        // cancelled first (the semaphore orders this store before the waits
+        // it releases), then release every phase that was never signalled;
+        // BackwardPass() skips PruneTimeRange() for those, because their
+        // frames were never propagated.
+        cancelled_.store(true);
+        for (; signalled_phases < prune_t_begin_end_.size(); ++signalled_phases)
+          backward_semaphore_.Signal(c_);
+        pool->WaitAllTasksFinished();
+        return false;
       }
     }
     // The FrameInfo for time T+1 will have no states.  We did that
@@ -246,6 +272,7 @@ class MultiGraphDenseIntersectPruned {
     frames_.pop_back();
 
     pool->WaitAllTasksFinished();
+    return true;
   }
 
   /* Does the main work of intersection/composition, but doesn't produce any
@@ -426,7 +453,9 @@ class MultiGraphDenseIntersectPruned {
       backward_semaphore_.Wait(c_);
       int32_t prune_t_begin = prune_t_begin_end_[i].first,
                 prune_t_end = prune_t_begin_end_[i].second;
-      PruneTimeRange(prune_t_begin, prune_t_end);
+      // After cancellation the remaining phases are released without their
+      // frames ever being propagated; only drain them.
+      if (!cancelled_.load()) PruneTimeRange(prune_t_begin, prune_t_end);
       forward_semaphore_.release();
     }
   }
@@ -1731,6 +1760,10 @@ class MultiGraphDenseIntersectPruned {
   // *previous* phase of backward pruning to complete, rather than the current
   // one.
   k2std::counting_semaphore forward_semaphore_;
+
+  // Set by Intersect() when should_stop abandons the forward pass; read by the
+  // backward thread to skip pruning of frames that were never propagated.
+  std::atomic<bool> cancelled_{false};
 };
 
 void IntersectDensePruned(FsaVec &a_fsas, DenseFsaVec &b_fsas,
@@ -1750,6 +1783,27 @@ void IntersectDensePruned(FsaVec &a_fsas, DenseFsaVec &b_fsas,
                                              online_decoding);
   intersector.Intersect(&b_fsas);
   intersector.FormatOutput(out, arc_map_a, arc_map_b);
+}
+
+bool IntersectDensePruned(FsaVec &a_fsas, DenseFsaVec &b_fsas,
+                          float search_beam, float output_beam,
+                          int32_t min_active_states, int32_t max_active_states,
+                          bool allow_partial,
+                          FsaVec *out, Array1<int32_t> *arc_map_a,
+                          Array1<int32_t> *arc_map_b,
+                          IntersectShouldStopFn should_stop, void *user_data) {
+  NVTX_RANGE("IntersectDensePruned");
+  FsaVec a_vec = FsaToFsaVec(a_fsas);
+  bool online_decoding = false;
+  MultiGraphDenseIntersectPruned intersector(a_vec, b_fsas.shape.Dim0(),
+                                             search_beam, output_beam,
+                                             min_active_states,
+                                             max_active_states,
+                                             allow_partial,
+                                             online_decoding);
+  if (!intersector.Intersect(&b_fsas, should_stop, user_data)) return false;
+  intersector.FormatOutput(out, arc_map_a, arc_map_b);
+  return true;
 }
 
 OnlineDenseIntersecter::OnlineDenseIntersecter(FsaVec &a_fsas,
