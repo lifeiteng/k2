@@ -74,6 +74,13 @@ class ThreadPool {
    */
   void WaitAllTasksFinished();
 
+  /* Non-blocking quiescence query: true when `tasks_` is empty and no task is
+   * running (the same predicate `WaitAllTasksFinished()` waits for). Used by
+   * callers that must not block while background tasks may still need a
+   * signal from the very thread that is leaving the scope.
+   */
+  bool AllTasksFinished();
+
  private:
   /* Remove tasks from `task_` and process them.
    *
@@ -115,12 +122,54 @@ class ThreadPool {
   int32_t running_counter_ = 0;
 };
 
-/* Get a pointer to global thread pool.
+/* Get a pointer to the thread pool visible in the caller's scope.
+ *
+ * Priority of resolution:
+ *   1. If the caller thread is inside a `ScopedThreadPoolOverride` scope,
+ *      the pool owned by that scope is returned (per-scope pool).
+ *   2. Otherwise, a process-wide global pool is returned (created lazily
+ *      with 2 threads and never freed — upstream behavior).
+ *
+ * A pool task thread must never obtain a pool this way: k2 phase tasks never
+ * call GetThreadPool() (only caller-side code in intersect/connect does), so
+ * calling it from a task thread is a program invariant violation and fails
+ * fast with K2_LOG(FATAL) instead of silently reaching across pools and
+ * waiting on tasks owned by another execution scope.
  *
  * The returned pointer is NOT owned by the caller and
  * it must not be freed by the caller.
  */
 ThreadPool *GetThreadPool();
+
+/* True on threads that are owned by a `ThreadPool` and that execute
+ * `ProcessTasks()` for it. Callers that take external execution leases
+ * (e.g. lattifai-engine's search execution contexts) use this to reject
+ * dangerous re-entry from task threads. */
+bool IsThreadPoolTaskThread();
+
+/* RAII: while in scope on the current thread, `GetThreadPool()` returns
+ * `pool` (which must outlive the scope) instead of the global fallback
+ * pool. The previously overridden pool, if any, is restored on
+ * destruction.
+ *
+ * This must be used from the caller thread, never from a pool task
+ * thread; the constructor fails fast on a task thread for the same reason
+ * as `GetThreadPool()`. Enforcing the caller-side invariant is the lease's
+ * job (see lattifai-engine `search_execution.h`).
+ */
+class ScopedThreadPoolOverride {
+ public:
+  explicit ScopedThreadPoolOverride(ThreadPool *pool);
+
+  // Restores the previous override; the pool itself is owned elsewhere.
+  ~ScopedThreadPoolOverride();
+
+  ScopedThreadPoolOverride(const ScopedThreadPoolOverride &) = delete;
+  ScopedThreadPoolOverride &operator=(const ScopedThreadPoolOverride &) = delete;
+
+ private:
+  ThreadPool *previous_;
+};
 
 }  // namespace k2
 

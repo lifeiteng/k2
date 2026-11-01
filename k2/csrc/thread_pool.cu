@@ -22,6 +22,27 @@
 
 namespace k2 {
 
+namespace {
+
+// Caller-scope pool override (bound/restored by ScopedThreadPoolOverride).
+// It only affects the thread that owns this TLS slot; task threads are
+// forbidden from obtaining a pool or binding an override.
+thread_local ThreadPool *t_active_pool = nullptr;
+
+// True on threads owned by a ThreadPool that execute ProcessTasks().
+thread_local bool t_is_task_thread = false;
+
+// RAII marker for pool-owned task threads.
+class TaskThreadMarker {
+ public:
+  TaskThreadMarker() { t_is_task_thread = true; }
+  ~TaskThreadMarker() { t_is_task_thread = false; }
+  TaskThreadMarker(const TaskThreadMarker &) = delete;
+  TaskThreadMarker &operator=(const TaskThreadMarker &) = delete;
+};
+
+}  // namespace
+
 static int32_t GetDefaultNumThreads() {
   int num_threads = std::thread::hardware_concurrency();
   if (num_threads == 0) num_threads = 1;
@@ -30,8 +51,25 @@ static int32_t GetDefaultNumThreads() {
 
 ThreadPool::ThreadPool(int32_t num_threads)
     : threads_(num_threads > 0 ? num_threads : GetDefaultNumThreads()) {
-  for (auto &thread : threads_)
-    thread = std::thread([this]() { this->ProcessTasks(); });
+  // Exception-safe thread startup: if a std::thread constructor throws (thread
+  // limit reached, etc.), the joinable threads started so far would make the
+  // destructor call std::terminate. Stop and join them, then rethrow. No task
+  // can have been submitted yet, so keep_running_ = false makes them exit.
+  size_t started = 0;
+  try {
+    for (auto &thread : threads_) {
+      thread = std::thread([this]() { this->ProcessTasks(); });
+      ++started;
+    }
+  } catch (...) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      keep_running_ = false;
+      not_empty_cond_.notify_all();
+    }
+    for (size_t i = 0; i < started; ++i) threads_[i].join();
+    throw;
+  }
 }
 
 ThreadPool::~ThreadPool() {
@@ -52,7 +90,16 @@ void ThreadPool::WaitAllTasksFinished() {
   }
 }
 
+bool ThreadPool::AllTasksFinished() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return finished_;
+}
+
 void ThreadPool::ProcessTasks() {
+  // Mark pool-owned task threads so that GetThreadPool() can fail fast when a
+  // task body tries to reach a pool (see the pool-scope contract in the
+  // header).
+  TaskThreadMarker marker;
   std::unique_lock<std::mutex> lock(mutex_);
   while (keep_running_) {
     while (tasks_.empty() && keep_running_) {
@@ -86,7 +133,18 @@ void ThreadPool::ProcessTasks() {
   }
 }
 
+bool IsThreadPoolTaskThread() { return t_is_task_thread; }
+
 ThreadPool *GetThreadPool() {
+  // A task thread must not reach across pools: k2 tasks never call
+  // GetThreadPool() (only caller-side intersect/connect code does), so this is
+  // a program invariant violation. Fail fast instead of silently handing out
+  // the global pool to a task that belongs to another execution scope.
+  if (t_is_task_thread) {
+    K2_LOG(FATAL) << "GetThreadPool() called from a thread pool task thread; "
+                     "k2 tasks must not obtain a pool";
+  }
+  if (t_active_pool) return t_active_pool;
   static ThreadPool *pool = nullptr;
   static std::once_flag init_flag;
 
@@ -100,5 +158,20 @@ ThreadPool *GetThreadPool() {
   K2_CHECK_NE(pool, nullptr);
   return pool;
 }
+
+ScopedThreadPoolOverride::ScopedThreadPoolOverride(ThreadPool *pool)
+    : previous_(t_active_pool) {
+  K2_CHECK_NE(pool, nullptr);
+  // Same invariant as GetThreadPool(): a task thread must not change its pool
+  // visibility. Fail fast (K2_LOG(FATAL) throws runtime_error unless K2_ABORT
+  // is set).
+  if (t_is_task_thread) {
+    K2_LOG(FATAL) << "ScopedThreadPoolOverride constructed on a thread pool "
+                     "task thread";
+  }
+  t_active_pool = pool;
+}
+
+ScopedThreadPoolOverride::~ScopedThreadPoolOverride() { t_active_pool = previous_; }
 
 }  // namespace k2

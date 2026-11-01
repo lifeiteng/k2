@@ -225,54 +225,74 @@ class MultiGraphDenseIntersectPruned {
     NVTX_RANGE(os.str().c_str());
 
     ThreadPool* pool = GetThreadPool();
-    pool->SubmitTask([this]() { BackwardPassStatic(this); });
 
-    // we'll initially populate frames_[0.. T+1], but discard the one at T+1,
-    // which has no arcs or states, the ones we use are from 0 to T.
-    frames_.reserve(T + 2);
-
-    frames_.push_back(InitialFrameInfo());
-
-    // Number of pruning phases signalled to the backward thread so far.
+    // Number of pruning phases signalled to the backward thread so far. It is
+    // declared before the task is submitted so that both the cancellation path
+    // and the exceptional path can release exactly the phases that were never
+    // signalled.
     size_t signalled_phases = 0;
-    for (int32_t t = 0; t <= T; t++) {
-      if (state_map_.NumKeyBits() == 32) {
-        frames_.push_back(PropagateForward<32>(t, frames_.back().get()));
-      } else if (state_map_.NumKeyBits() == 36) {
-        frames_.push_back(PropagateForward<36>(t, frames_.back().get()));
-      } else {
-        K2_CHECK_EQ(state_map_.NumKeyBits(), 40);
-        frames_.push_back(PropagateForward<40>(t, frames_.back().get()));
-      }
-      if (do_pruning_after_[t]) {
-        // let a phase of backward-pass pruning commence.
-        backward_semaphore_.Signal(c_);
-        ++signalled_phases;
-        // note: normally we should acquire forward_semaphore_ without having to
-        // wait.  It avoids the backward pass getting too far behind the forward
-        // pass, which could mean too much memory is used.
-        forward_semaphore_.acquire();
-      }
-      if (should_stop != nullptr && should_stop(t, T, user_data)) {
-        // The backward thread waits once per pruning phase.  Mark the run as
-        // cancelled first (the semaphore orders this store before the waits
-        // it releases), then release every phase that was never signalled;
-        // BackwardPass() skips PruneTimeRange() for those, because their
-        // frames were never propagated.
-        cancelled_.store(true);
-        for (; signalled_phases < prune_t_begin_end_.size(); ++signalled_phases)
-          backward_semaphore_.Signal(c_);
-        pool->WaitAllTasksFinished();
-        return false;
-      }
-    }
-    // The FrameInfo for time T+1 will have no states.  We did that
-    // last PropagateForward so that the 'arcs' member of frames_[T]
-    // is set up (it has no arcs but we need the shape).
-    frames_.pop_back();
 
-    pool->WaitAllTasksFinished();
-    return true;
+    // Drain the backward task with the same protocol as the cancellation path:
+    // mark the run cancelled first (BackwardPass() checks cancelled_ after each
+    // semaphore wait and skips PruneTimeRange() for phases whose frames were
+    // never propagated), release every phase that was not signalled, then wait
+    // for the task to exit while `this` is still alive.
+    auto drain_backward_task = [&]() {
+      cancelled_.store(true);
+      for (; signalled_phases < prune_t_begin_end_.size(); ++signalled_phases)
+        backward_semaphore_.Signal(c_);
+      pool->WaitAllTasksFinished();
+    };
+
+    // If SubmitTask() itself throws, the task was never queued: there is
+    // nothing to drain and the exception propagates as-is.
+    pool->SubmitTask([this]() { BackwardPassStatic(this); });
+    try {
+      // we'll initially populate frames_[0.. T+1], but discard the one at T+1,
+      // which has no arcs or states, the ones we use are from 0 to T.
+      frames_.reserve(T + 2);
+
+      frames_.push_back(InitialFrameInfo());
+
+      for (int32_t t = 0; t <= T; t++) {
+        if (state_map_.NumKeyBits() == 32) {
+          frames_.push_back(PropagateForward<32>(t, frames_.back().get()));
+        } else if (state_map_.NumKeyBits() == 36) {
+          frames_.push_back(PropagateForward<36>(t, frames_.back().get()));
+        } else {
+          K2_CHECK_EQ(state_map_.NumKeyBits(), 40);
+          frames_.push_back(PropagateForward<40>(t, frames_.back().get()));
+        }
+        if (do_pruning_after_[t]) {
+          // let a phase of backward-pass pruning commence.
+          backward_semaphore_.Signal(c_);
+          ++signalled_phases;
+          // note: normally we should acquire forward_semaphore_ without having
+          // to wait.  It avoids the backward pass getting too far behind the
+          // forward pass, which could mean too much memory is used.
+          forward_semaphore_.acquire();
+        }
+        if (should_stop != nullptr && should_stop(t, T, user_data)) {
+          drain_backward_task();
+          return false;
+        }
+      }
+      // The FrameInfo for time T+1 will have no states.  We did that
+      // last PropagateForward so that the 'arcs' member of frames_[T]
+      // is set up (it has no arcs but we need the shape).
+      frames_.pop_back();
+
+      pool->WaitAllTasksFinished();
+      return true;
+    } catch (...) {
+      // Any foreground exception after the task was queued (allocation
+      // failure, CUDA error, a throwing should_stop callback, ...) would leave
+      // the backward task waiting forever for phase signals that never come,
+      // while it still dereferences `this`. Drain it here, before the object
+      // can be destroyed, then rethrow the original exception.
+      drain_backward_task();
+      throw;
+    }
   }
 
   /* Does the main work of intersection/composition, but doesn't produce any
